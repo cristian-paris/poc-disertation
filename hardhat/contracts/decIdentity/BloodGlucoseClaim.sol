@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.30;
 
 import "fhevm/lib/TFHE.sol";
 import "./MedicalID.sol";
@@ -22,9 +22,9 @@ contract BloodGlucoseClaim is SepoliaZamaFHEVMConfig, Ownable2Step {
     error EmptyUserList();
 
     /// @dev Counter for tracking the latest claim ID
-    uint256 public lastClaimID = 0;
+    uint64 public lastClaimID = 0;
     /// @dev Mapping of claim IDs to encrypted numerical results for blood glucose claims
-    mapping(uint256 => euint256) private bloodGlucoseClaims;
+    mapping(uint64 => euint64) private bloodGlucoseClaims;
 
     /// @dev Instance of IdMapping contract for user ID management
     IdMapping private idMapping;
@@ -33,7 +33,7 @@ contract BloodGlucoseClaim is SepoliaZamaFHEVMConfig, Ownable2Step {
 
     /// @dev Emitted when a blood glucose claim
     /// @param claimId The ID of the generated claim
-    event BloodGlucoseClaimEvent(uint256 claimId);
+    event BloodGlucoseClaimEvent(uint64 claimId);
 
     /**
      * @dev Constructor to initialize the contract with required contract addresses
@@ -53,31 +53,28 @@ contract BloodGlucoseClaim is SepoliaZamaFHEVMConfig, Ownable2Step {
      * @notice Computes the average bloodGlucose level (encrypted) for a list of users
      * @dev   Fetches each user's encrypted bloodGlucose via MedicalID.getIdentity(...)
      *        Homomorphically adds them, then divides by the list length.
-     *        Returns the resulting ciphertext. On‐chain decryption is not possible,
-     *        so this function returns an encrypted average (euint256).
+     *        Returns the resulting ciphertext.
      * @param userIds Array of user IDs whose bloodGlucose levels to average
      * @custom:throws NotAuthorized   if called by anyone other than the MedicalID contract
      * @custom:throws EmptyUserList   if the input array is empty
      * @custom:emits AdultClaimGenerated when claim is generated
      */
-    function generateBloodGlucoseClaim(uint256[] memory userIds, address authAddress) public {
+    function generateBloodGlucoseClaim(uint64[] memory userIds, address authAddress) public {
         // Only the MedicalID contract is permitted to call this method
         if (msg.sender != address(medicalIDContract)) revert NotAuthorized();
 
-        uint256 len = userIds.length;
+        uint64 len = uint64(userIds.length);
         if (len == 0) revert EmptyUserList();
 
-        (, euint256 bg0, , , ) = medicalIDContract.getIdentity(userIds[0]);
+        euint64 sum = TFHE.asEuint64(0);
 
-        euint256 sum = bg0;
-
-        for (uint256 i = 1; i < len; i++) {
-            (, euint256 bg, , , ) = medicalIDContract.getIdentity(userIds[i]);
+        for (uint256 i = 0; i < len; i++) {
+            (, euint16 bg, , , ) = medicalIDContract.getIdentity(userIds[i]);
 
             sum = TFHE.add(sum, bg);
         }
 
-        euint256 average = TFHE.div(sum, len);
+        euint64 average = TFHE.div(sum, len);
 
         lastClaimID++;
 
@@ -89,7 +86,7 @@ contract BloodGlucoseClaim is SepoliaZamaFHEVMConfig, Ownable2Step {
         emit BloodGlucoseClaimEvent(lastClaimID);
     }
 
-    function getBloodGlucoseClaim(uint256 claimId) public view returns (euint256) {
+    function getBloodGlucoseClaim(uint64 claimId) public view returns (euint64) {
         if (claimId == 0 || claimId > lastClaimID) revert InvalidClaimId();
         return bloodGlucoseClaims[claimId];
     }

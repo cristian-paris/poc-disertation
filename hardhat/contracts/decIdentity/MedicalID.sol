@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.30;
 
 import "fhevm/lib/TFHE.sol";
 import "./IdMapping.sol";
@@ -27,6 +27,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
     /// @notice Thrown when claim generation fails, includes failure data
     /// @param data The error data returned from the failed claim generation
     error ClaimGenerationFailed(bytes data);
+    /// @notice Thrown when no field is provided or an invalid field is requested
     error InvalidField();
 
     /**
@@ -38,18 +39,18 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      * @param birthdate Encrypted date of birth in unix timestamp format
      */
     struct Identity {
-        euint128 id; /// @dev Encrypted unique ID
-        euint256 bloodGlucose; /// @dev Encrypted blood glucose level
+        euint64 id; /// @dev Encrypted unique ID
+        euint16 bloodGlucose; /// @dev Encrypted blood glucose level
         ebytes64 firstname; /// @dev Encrypted first name
         ebytes64 lastname; /// @dev Encrypted last name
-        euint64 birthdate; /// @dev Encrypted birthdate for age verification
+        euint32 birthdate; /// @dev Encrypted birthdate for age verification
     }
 
     /// @dev Instance of IdMapping contract
     IdMapping private idMapping;
 
     /// @dev Mapping to store identities by user ID
-    mapping(uint256 => Identity) private citizenIdentities;
+    mapping(uint64 => Identity) private citizenIdentities;
     /// @dev Mapping to track registered identities
     mapping(uint256 => bool) public registered;
 
@@ -98,7 +99,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      * @custom:throws AlreadyRegistered if userId already has an identity registered
      */
     function registerIdentity(
-        uint256 userId,
+        uint64 userId,
         einput bloodGlucose,
         einput firstname,
         einput lastname,
@@ -108,15 +109,15 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
         if (registered[userId]) revert AlreadyRegistered();
 
         /// @dev Generate a new encrypted unique ID
-        euint128 newId = TFHE.randEuint128();
+        euint64 newId = TFHE.randEuint64();
 
         /// @dev Store the encrypted identity data
         citizenIdentities[userId] = Identity({
             id: newId,
-            bloodGlucose: TFHE.asEuint256(bloodGlucose, inputProof),
+            bloodGlucose: TFHE.asEuint16(bloodGlucose, inputProof),
             firstname: TFHE.asEbytes64(firstname, inputProof),
             lastname: TFHE.asEbytes64(lastname, inputProof),
-            birthdate: TFHE.asEuint64(birthdate, inputProof)
+            birthdate: TFHE.asEuint32(birthdate, inputProof)
         });
 
         registered[userId] = true; /// @dev Mark the identity as registered
@@ -150,7 +151,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      * @return Tuple containing (id, bloodGlucose, firstname, lastname, birthdate)
      * @custom:throws IdentityNotRegistered if no identity exists for userId
      */
-    function getIdentity(uint256 userId) public view virtual returns (euint128, euint256, ebytes64, ebytes64, euint64) {
+    function getIdentity(uint64 userId) public view virtual returns (euint64, euint16, ebytes64, ebytes64, euint32) {
         if (!registered[userId]) revert IdentityNotRegistered();
         return (
             citizenIdentities[userId].id,
@@ -165,10 +166,10 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      * @notice Retrieves only the encrypted birthdate for a user
      * @dev Useful for age verification claims
      * @param userId ID of the user whose birthdate to retrieve
-     * @return Encrypted birthdate as euint64
+     * @return Encrypted birthdate as euint32
      * @custom:throws IdentityNotRegistered if no identity exists for userId
      */
-    function getBirthdate(uint256 userId) public view virtual returns (euint64) {
+    function getBirthdate(uint64 userId) public view virtual returns (euint32) {
         if (!registered[userId]) revert IdentityNotRegistered();
         return citizenIdentities[userId].birthdate;
     }
@@ -180,7 +181,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      * @return Encrypted first name as ebytes64
      * @custom:throws IdentityNotRegistered if no identity exists for userId
      */
-    function getMyIdentityFirstname(uint256 userId) public view virtual returns (ebytes64) {
+    function getMyIdentityFirstname(uint64 userId) public view virtual returns (ebytes64) {
         if (!registered[userId]) revert IdentityNotRegistered();
         return citizenIdentities[userId].firstname;
     }
@@ -192,7 +193,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      * @return Encrypted last name as ebytes64
      * @custom:throws IdentityNotRegistered if no identity exists for userId
      */
-    function getMyIdentityLastname(uint256 userId) public view virtual returns (ebytes64) {
+    function getMyIdentityLastname(uint64 userId) public view virtual returns (ebytes64) {
         if (!registered[userId]) revert IdentityNotRegistered();
         return citizenIdentities[userId].lastname;
     }
@@ -201,10 +202,10 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      * @notice Retrieves only the encrypted glucose level for a user
      * @dev Useful for identity verification claims
      * @param userId ID of the user whose glucose level to retrieve
-     * @return Encrypted glucose level as ebytes64
+     * @return Encrypted glucose level as euint16
      * @custom:throws IdentityNotRegistered if no identity exists for userId
      */
-    function getMyIdentityGlucoseLevel(uint256 userId) public view virtual returns (euint256) {
+    function getMyIdentityGlucoseLevel(uint64 userId) public view virtual returns (euint16) {
         if (!registered[userId]) revert IdentityNotRegistered();
         return citizenIdentities[userId].bloodGlucose;
     }
@@ -223,7 +224,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
     function generateClaim(
         address claimAddress,
         string memory claimFn,
-        uint256[] memory userIds,
+        uint64[] memory userIds,
         string[] memory fields
     ) public {
         ebytes128 test = TFHE.randEbytes128();
@@ -232,7 +233,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
         // For each requested userId, grant transient access to the requested fields
         // WARNING: more ids and fields equal to more gas, which would drive the costs up
         for (uint64 ui = 0; ui < userIds.length; ui++) {
-            uint256 uid = userIds[ui];
+            uint64 uid = userIds[ui];
             if (!registered[uid]) revert IdentityNotRegistered();
 
             for (uint64 i = 0; i < fields.length; i++) {

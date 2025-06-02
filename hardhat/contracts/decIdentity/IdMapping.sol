@@ -1,5 +1,5 @@
 /// SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.30;
 
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "fhevm/config/ZamaFHEVMConfig.sol";
@@ -7,6 +7,7 @@ import "fhevm/config/ZamaFHEVMConfig.sol";
 /**
  * @title IdMapping
  * @author ZAMA
+ * @notice This contract has been modified by Cristian Paris for testing purposes
  * @notice Manages unique ID mappings between addresses and sequential IDs
  * @dev Inherits from Ownable2Step for secure ownership transfer
  */
@@ -26,18 +27,18 @@ contract IdMapping is SepoliaZamaFHEVMConfig, Ownable2Step {
     error NoAddressFound();
 
     /// @notice Maps user addresses to their unique IDs
-    mapping(address => uint256) public addressToId;
+    mapping(address => uint64) public addressToId;
     /// @dev Maps unique IDs back to user addresses
-    mapping(uint256 => address) private idToAddress;
+    mapping(uint64 => address) private idToAddress;
     /// @dev Counter for assigning sequential IDs, starts at 1
-    uint256 private nextId = 1;
+    uint64 private nextId = 1;
 
     /**
      * @notice Emitted when a new ID is generated for a user
      * @param user The address of the user receiving the ID
      * @param id The unique ID assigned to the user
      */
-    event IdGenerated(address indexed user, uint256 indexed id);
+    event IdGenerated(address indexed user, uint64 indexed id);
 
     /**
      * @notice Initializes the contract with the deployer as owner
@@ -50,15 +51,15 @@ contract IdMapping is SepoliaZamaFHEVMConfig, Ownable2Step {
     /**
      * @notice Generates a unique ID for the calling address
      * @dev Each address can only generate one ID. IDs are assigned sequentially starting from 1
-     * @return uint256 The newly generated ID
+     * @return uint64 The newly generated ID
      * @custom:throws IdAlreadyGenerated if caller already has an ID
      * @custom:throws InvalidAddress if caller is zero address
      * @custom:throws IdOverflow if maximum ID value is reached
      */
-    function generateId() public returns (uint256) {
+    function generateId() public returns (uint64) {
         if (addressToId[msg.sender] != 0) revert IdAlreadyGenerated();
 
-        uint256 newId = nextId;
+        uint64 newId = nextId;
 
         addressToId[msg.sender] = newId;
         idToAddress[newId] = msg.sender;
@@ -72,11 +73,11 @@ contract IdMapping is SepoliaZamaFHEVMConfig, Ownable2Step {
      * @notice Looks up the ID associated with a given address
      * @dev Reverts if address has no ID or is zero address
      * @param _addr The address to lookup
-     * @return uint256 The ID associated with the address
+     * @return uint64 The ID associated with the address
      * @custom:throws InvalidAddress if provided address is zero address
      * @custom:throws NoIdGenerated if address has no ID assigned
      */
-    function getId(address _addr) public view returns (uint256) {
+    function getId(address _addr) public view returns (uint64) {
         if (_addr == address(0)) revert InvalidAddress();
         if (addressToId[_addr] == 0) revert NoIdGenerated();
         return addressToId[_addr];
@@ -90,7 +91,7 @@ contract IdMapping is SepoliaZamaFHEVMConfig, Ownable2Step {
      * @custom:throws InvalidId if ID is 0 or greater than the last assigned ID
      * @custom:throws NoAddressFound if no address is associated with the ID
      */
-    function getAddr(uint256 _id) public view returns (address) {
+    function getAddr(uint64 _id) public view returns (address) {
         if (_id == 0 || _id >= nextId) revert InvalidId();
         address addr = idToAddress[_id];
         if (addr == address(0)) revert NoAddressFound();
@@ -104,7 +105,7 @@ contract IdMapping is SepoliaZamaFHEVMConfig, Ownable2Step {
      * @custom:throws NoIdGenerated if address has no ID assigned
      */
     function resetIdForAddress(address _addr) external onlyOwner {
-        uint256 id = addressToId[_addr];
+        uint64 id = addressToId[_addr];
         if (id == 0) revert NoIdGenerated();
 
         delete addressToId[_addr];

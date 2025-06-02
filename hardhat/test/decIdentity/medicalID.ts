@@ -6,7 +6,7 @@ import type { FhevmInstance } from "fhevmjs";
 
 import type { BloodGlucoseClaim, IdMapping, MedicalID } from "../../types";
 import { createInstance } from "../instance";
-import { reencryptEbool, reencryptEbytes64, reencryptEuint256 } from "../reencrypt";
+import { reencryptEbytes64, reencryptEuint256, reencryptEuint64 } from "../reencrypt";
 import { getSigners, initSigners } from "../signers";
 import { bigIntToBytes64 } from "../utils";
 import { deployBloodGlucoseClaimFixture } from "./fixture/BloodGlucoseClaim.fixture";
@@ -54,10 +54,10 @@ describe("MedicalID", function () {
   ) {
     const input = instance.createEncryptedInput(medicalAddress, signer.address);
     const encryptedData = await input
-      .add256(bloodGlucose)
+      .add16(bloodGlucose)
       .addBytes64(firstname)
       .addBytes64(lastname)
-      .add64(birthdate)
+      .add32(birthdate)
       .encrypt();
 
     await medicalID
@@ -122,31 +122,25 @@ describe("MedicalID", function () {
     const userId2 = await idMapping.getId(this.signers.bob);
 
     // Only Alice (owner and registrar) can add new identities
-    await registerIdentity(userId1, this.instances, this.medicalIDAddress, this.signers.alice, 20n);
-    await registerIdentity(userId2, this.instances, this.medicalIDAddress, this.signers.alice, 10n);
+    await registerIdentity(userId1, this.instances, this.medicalIDAddress, this.signers.alice, 723n);
+    await registerIdentity(userId2, this.instances, this.medicalIDAddress, this.signers.alice, 145n);
 
     const tx = await medicalID
       .connect(this.signers.carol)
-      .generateClaim(this.bloodGlucoseClaimAddress, "generateBloodGlucoseClaim(uint256[],address)",[userId1, userId2], ["id", "birthdate", "bloodGlucose"]);
+      .generateClaim(this.bloodGlucoseClaimAddress, "generateBloodGlucoseClaim(uint64[],address)",[userId1, userId2], ["id", "birthdate", "bloodGlucose"]);
 
     await expect(tx).to.emit(bloodGlucoseClaim, "BloodGlucoseClaimEvent");
 
     const latestClaimUserId = await bloodGlucoseClaim.lastClaimID();
-
-    console.log("Adults claim id is: ", latestClaimUserId);
-
     const adultsClaim = await bloodGlucoseClaim.getBloodGlucoseClaim(latestClaimUserId);
 
-
-    console.log("Adults claim is: ", adultsClaim);
-
-    const reencrypted = await reencryptEuint256(
+    const reencrypted = await reencryptEuint64(
       this.signers.carol,
       this.instances,
       adultsClaim,
       this.bloodGlucoseClaimAddress,
     );
 
-    expect(reencrypted).to.equal(15n);
+    expect(reencrypted).to.equal(434n);
   });
 });
