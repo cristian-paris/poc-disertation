@@ -16,6 +16,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
     /// @dev Constants
     bytes32 public constant REGISTRAR_ROLE = keccak256("REGISTRAR_ROLE");
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
+    bytes32 public constant CLAIM_RUNNER_ROLE = keccak256("CLAIM_RUNNER_ROLE");
 
     /// @dev Custom errors
     /// @notice Thrown when attempting to register an identity for a user who already has one
@@ -66,6 +67,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
         idMapping = IdMapping(_idMappingAddress);
         _grantRole(OWNER_ROLE, msg.sender); /// @dev Admin role for contract owner
         _grantRole(REGISTRAR_ROLE, msg.sender); /// @dev Registrar role for contract owner
+        _grantRole(CLAIM_RUNNER_ROLE, msg.sender); /// @dev Claim runner role for contract owner
     }
 
     /**
@@ -84,6 +86,24 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
      */
     function removeRegistrar(address registrar) external onlyRole(OWNER_ROLE) {
         _revokeRole(REGISTRAR_ROLE, registrar);
+    }
+
+    /**
+     * @notice Grants an account the ability to execute claims
+     * @dev Only callable by admin role
+     * @param whitelistedAddress Address to be granted the claim runner role
+     */
+    function addToWhitelist(address whitelistedAddress) external onlyRole(OWNER_ROLE) {
+        _grantRole(CLAIM_RUNNER_ROLE, whitelistedAddress);
+    }
+
+    /**
+     * @notice Revokes claim runner role from an address
+     * @dev Only callable by admin role
+     * @param removedAddress Address to have registrar permissions revoked
+     */
+    function removeFromWhitelist(address removedAddress) external onlyRole(OWNER_ROLE) {
+        _revokeRole(REGISTRAR_ROLE, removedAddress);
     }
 
     /**
@@ -226,7 +246,7 @@ contract MedicalID is SepoliaZamaFHEVMConfig, AccessControl {
         string memory claimFn,
         uint64[] memory userIds,
         string[] memory fields
-    ) public {
+    ) public onlyRole(CLAIM_RUNNER_ROLE) {
         ebytes128 test = TFHE.randEbytes128();
         TFHE.isInitialized(test);
 

@@ -121,26 +121,35 @@ describe("MedicalID", function () {
     await idMapping.connect(this.signers.bob).generateId();
     const userId2 = await idMapping.getId(this.signers.bob);
 
+    await idMapping.connect(this.signers.carol).generateId();
+    const userId3 = await idMapping.getId(this.signers.carol);
+
     // Only Alice (owner and registrar) can add new identities
     await registerIdentity(userId1, this.instances, this.medicalIDAddress, this.signers.alice, 723n);
     await registerIdentity(userId2, this.instances, this.medicalIDAddress, this.signers.alice, 145n);
+    await registerIdentity(userId3, this.instances, this.medicalIDAddress, this.signers.alice, 132n);
 
+    // Grant dave the role of claim runner
+    await medicalID.connect(this.signers.alice).addToWhitelist(this.signers.dave.address);
+
+    // Dave issues a new claim
     const tx = await medicalID
-      .connect(this.signers.carol)
-      .generateClaim(this.bloodGlucoseClaimAddress, "generateBloodGlucoseClaim(uint64[],address)",[userId1, userId2], ["id", "birthdate", "bloodGlucose"]);
+      .connect(this.signers.dave)
+      .generateClaim(this.bloodGlucoseClaimAddress, "generateBloodGlucoseClaim(uint64[],address)",[userId1, userId2, userId3], ["id", "birthdate", "bloodGlucose"]);
 
     await expect(tx).to.emit(bloodGlucoseClaim, "BloodGlucoseClaimEvent");
 
     const latestClaimUserId = await bloodGlucoseClaim.lastClaimID();
     const adultsClaim = await bloodGlucoseClaim.getBloodGlucoseClaim(latestClaimUserId);
 
+    // Dave is the only one to have the rights to decrypt it
     const reencrypted = await reencryptEuint64(
-      this.signers.carol,
+      this.signers.dave,
       this.instances,
       adultsClaim,
       this.bloodGlucoseClaimAddress,
     );
 
-    expect(reencrypted).to.equal(434n);
+    expect(reencrypted).to.equal(333n);
   });
 });
