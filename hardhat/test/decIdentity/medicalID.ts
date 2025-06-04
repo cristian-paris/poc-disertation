@@ -6,7 +6,7 @@ import type { FhevmInstance } from "fhevmjs";
 
 import type { BloodGlucoseClaim, IdMapping, MedicalID } from "../../types";
 import { createInstance } from "../instance";
-import { reencryptEbytes64, reencryptEuint256, reencryptEuint64 } from "../reencrypt";
+import { reencryptEbytes64, reencryptEuint64 } from "../reencrypt";
 import { getSigners, initSigners } from "../signers";
 import { bigIntToBytes64 } from "../utils";
 import { deployBloodGlucoseClaimFixture } from "./fixture/BloodGlucoseClaim.fixture";
@@ -34,10 +34,6 @@ describe("MedicalID", function () {
     medicalID = deployment.medicalID;
     idMapping = deployment.idMapping;
 
-    this.bloodGlucoseClaimAddress = await bloodGlucoseClaim.getAddress();
-    this.medicalIDAddress = await medicalID.getAddress();
-    this.idMappingAddress = await idMapping.getAddress();
-
     this.instances = await createInstance();
   });
 
@@ -60,46 +56,55 @@ describe("MedicalID", function () {
       .add32(birthdate)
       .encrypt();
 
-    await medicalID
-      .connect(signer)
-      .registerIdentity(
-        userId,
-        encryptedData.handles[0],
-        encryptedData.handles[1],
-        encryptedData.handles[2],
-        encryptedData.handles[3],
-        encryptedData.inputProof,
-      );
+    await (
+      await medicalID
+        .connect(signer)
+        .registerIdentity(
+          userId,
+          encryptedData.handles[0],
+          encryptedData.handles[1],
+          encryptedData.handles[2],
+          encryptedData.handles[3],
+          encryptedData.inputProof
+        )
+    ).wait();
   }
 
-  // Test case: Register an identity successfully
-  it("should register an identity successfully", async function () {
-    await idMapping.connect(this.signers.alice).generateId();
-    const userId = await idMapping.getId(this.signers.alice);
+  it("registers an identity successfully", async function () {
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
+    const userId = await idMapping.getId(this.signers.alice.address);
 
-    await registerIdentity(userId, this.instances, this.medicalIDAddress, this.signers.alice);
+    await registerIdentity(
+      userId,
+      this.instances,
+      await medicalID.getAddress(),
+      this.signers.alice
+    );
 
-    expect(await medicalID.registered(this.signers.alice.address));
+    expect(await medicalID.registered(userId)).to.be.true;
   });
 
-  // Test case: Prevent duplicate registration for the same user
-  it("should prevent duplicate registration for the same user", async function () {
-    await idMapping.connect(this.signers.alice).generateId();
-    const userId = await idMapping.getId(this.signers.alice);
+  it("prevents duplicate registration", async function () {
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
+    const userId = await idMapping.getId(this.signers.alice.address);
 
-    await registerIdentity(userId, this.instances, this.medicalIDAddress, this.signers.alice);
+    await registerIdentity(userId, this.instances, await medicalID.getAddress(), this.signers.alice);
 
     await expect(
-      registerIdentity(userId, this.instances, this.medicalIDAddress, this.signers.alice),
+      registerIdentity(userId, this.instances, await medicalID.getAddress(), this.signers.alice)
     ).to.be.revertedWithCustomError(medicalID, "AlreadyRegistered");
   });
 
-  // Test case: Retrieve the registered identity
-  it("should retrieve the registered identity", async function () {
-    await idMapping.connect(this.signers.alice).generateId();
-    const userId = await idMapping.getId(this.signers.alice);
+  it("retrieves the registered identity", async function () {
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
+    const userId = await idMapping.getId(this.signers.alice.address);
 
-    await registerIdentity(userId, this.instances, this.medicalIDAddress, this.signers.alice);
+    await registerIdentity(
+      userId,
+      this.instances,
+      await medicalID.getAddress(),
+      this.signers.alice
+    );
 
     const firstnameHandleAlice = await medicalID.getMyIdentityFirstname(userId);
 
@@ -107,49 +112,53 @@ describe("MedicalID", function () {
       this.signers.alice,
       this.instances,
       firstnameHandleAlice,
-      this.medicalIDAddress,
+      await medicalID.getAddress()
     );
 
     expect(reencryptedFirstname).to.equal(8);
   });
 
-  // Test case: Generate a blood glucose claim
-  it("should generate an adult claim", async function () {
-    await idMapping.connect(this.signers.alice).generateId();
-    const userId1 = await idMapping.getId(this.signers.alice);
+  it("generates an adult claim", async function () {
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
+    const id1 = await idMapping.getId(this.signers.alice.address);
 
-    await idMapping.connect(this.signers.bob).generateId();
-    const userId2 = await idMapping.getId(this.signers.bob);
+    await (await idMapping.connect(this.signers.bob).generateId()).wait();
+    const id2 = await idMapping.getId(this.signers.bob.address);
 
-    await idMapping.connect(this.signers.carol).generateId();
-    const userId3 = await idMapping.getId(this.signers.carol);
+    await (await idMapping.connect(this.signers.carol).generateId()).wait();
+    const id3 = await idMapping.getId(this.signers.carol.address);
 
-    // Only Alice (owner and registrar) can add new identities
-    await registerIdentity(userId1, this.instances, this.medicalIDAddress, this.signers.alice, 723n);
-    await registerIdentity(userId2, this.instances, this.medicalIDAddress, this.signers.alice, 145n);
-    await registerIdentity(userId3, this.instances, this.medicalIDAddress, this.signers.alice, 132n);
+    await registerIdentity(id1, this.instances, await medicalID.getAddress(), this.signers.alice, 723n);
+    await registerIdentity(id2, this.instances, await medicalID.getAddress(), this.signers.alice, 145n);
+    await registerIdentity(id3, this.instances, await medicalID.getAddress(), this.signers.alice, 132n);
 
-    // Grant dave the role of claim runner
-    await medicalID.connect(this.signers.alice).addToWhitelist(this.signers.dave.address);
+    await (await medicalID.connect(this.signers.alice)
+      .addToWhitelist(this.signers.dave.address)).wait();
 
-    // Dave issues a new claim
-    const tx = await medicalID
-      .connect(this.signers.dave)
-      .generateClaim(this.bloodGlucoseClaimAddress, "generateBloodGlucoseClaim(uint64[],address)",[userId1, userId2, userId3], ["id", "birthdate", "bloodGlucose"]);
-
-    await expect(tx).to.emit(bloodGlucoseClaim, "BloodGlucoseClaimEvent");
-
-    const latestClaimUserId = await bloodGlucoseClaim.lastClaimID();
-    const adultsClaim = await bloodGlucoseClaim.getBloodGlucoseClaim(latestClaimUserId);
-
-    // Dave is the only one to have the rights to decrypt it
-    const reencrypted = await reencryptEuint64(
-      this.signers.dave,
-      this.instances,
-      adultsClaim,
-      this.bloodGlucoseClaimAddress,
+    const tx = await medicalID.connect(this.signers.dave).generateClaim(
+      await bloodGlucoseClaim.getAddress(),
+      "generateBloodGlucoseClaim(uint64[],address)",
+      [id1, id2, id3],
+      ["id", "birthdate", "bloodGlucose"]
     );
 
-    expect(reencrypted).to.equal(333n);
+    await tx.wait();
+
+    await expect(tx)
+      .to.emit(bloodGlucoseClaim, "BloodGlucoseClaimEvent");
+
+    await tx.wait();
+
+    const claimId = await bloodGlucoseClaim.lastClaimID();
+    const encAvg = await bloodGlucoseClaim.getBloodGlucoseClaim(claimId);
+
+    const plainAvg = await reencryptEuint64(
+      this.signers.dave,
+      this.instances,
+      encAvg,
+      await bloodGlucoseClaim.getAddress()
+    );
+
+    expect(plainAvg).to.equal(333n);
   });
 });
