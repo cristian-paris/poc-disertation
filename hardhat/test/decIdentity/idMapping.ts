@@ -25,7 +25,7 @@ describe("IdMapping Contract", function () {
 
   it("Should set the ID for an address", async function () {
     // Set ID for addr1
-    await idMapping.generateId();
+    await (await idMapping.generateId()).wait();
 
     // Check if the ID was set correctly
     expect(await idMapping.getId(this.signers.alice)).to.equal(1);
@@ -33,8 +33,8 @@ describe("IdMapping Contract", function () {
 
   it("Should set IDs for multiple addresses", async function () {
     // Set IDs for addr1 and addr2
-    await idMapping.connect(this.signers.alice).generateId();
-    await idMapping.connect(this.signers.bob).generateId();
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
+    await (await idMapping.connect(this.signers.bob).generateId()).wait();
 
     // Verify each address has the correct ID
     expect(await idMapping.getId(this.signers.alice)).to.equal(1);
@@ -43,7 +43,7 @@ describe("IdMapping Contract", function () {
 
   it("Should retrieve address for a given ID", async function () {
     // Generate ID for alice
-    await idMapping.connect(this.signers.alice).generateId();
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
 
     // Get alice's address using their ID (1)
     const retrievedAddress = await idMapping.getAddr(1);
@@ -54,11 +54,11 @@ describe("IdMapping Contract", function () {
   });
 
   it("Should not allow generating multiple IDs for same address", async function () {
-    await idMapping.connect(this.signers.alice).generateId();
-    await expect(idMapping.connect(this.signers.alice).generateId()).to.be.revertedWithCustomError(
-      idMapping,
-      "IdAlreadyGenerated",
-    );
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
+
+    await expect(
+      idMapping.connect(this.signers.alice).generateId()
+    ).to.be.revertedWithCustomError(idMapping, "IdAlreadyGenerated");
   });
 
   it("Should fail when getting ID for zero address", async function () {
@@ -76,21 +76,23 @@ describe("IdMapping Contract", function () {
   });
 
   it("Should allow owner to reset ID for an address", async function () {
-    // Generate ID first
-    await idMapping.connect(this.signers.alice).generateId();
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
+
     const userId = await idMapping.getId(this.signers.alice.address);
 
-    // Reset ID
-    await idMapping.resetIdForAddress(this.signers.alice.address);
+    await (await idMapping.resetIdForAddress(this.signers.alice.address)).wait();
 
-    // Verify ID is reset
-    await expect(idMapping.getId(this.signers.alice.address)).to.be.revertedWithCustomError(idMapping, "NoIdGenerated");
+    await expect(
+      idMapping.getId(this.signers.alice.address)
+    ).to.be.revertedWithCustomError(idMapping, "NoIdGenerated");
 
-    await expect(idMapping.getAddr(userId)).to.be.revertedWithCustomError(idMapping, "NoAddressFound");
+    await expect(
+      idMapping.getAddr(userId)
+    ).to.be.revertedWithCustomError(idMapping, "NoAddressFound");
   });
 
   it("Should not allow non-owner to reset ID", async function () {
-    await idMapping.connect(this.signers.alice).generateId();
+    await (await idMapping.connect(this.signers.alice).generateId()).wait();
 
     await expect(
       idMapping.connect(this.signers.bob).resetIdForAddress(this.signers.alice.address),
