@@ -4,6 +4,7 @@ import { spawn } from "child_process";
 import dotenv from "dotenv";
 import "hardhat-deploy";
 import "hardhat-ignore-warnings";
+import "hardhat-contract-sizer";
 import { HardhatUserConfig, extendProvider } from "hardhat/config";
 import { task } from "hardhat/config";
 import type { NetworkUserConfig } from "hardhat/types";
@@ -90,6 +91,11 @@ const config: HardhatUserConfig = {
   defaultNetwork: "hardhat",
   namedAccounts: {
     deployer: 0,
+  },
+  contractSizer: {                
+    runOnCompile: true,
+    strict: false,
+    disambiguatePaths: false,
   },
   mocha: {
     timeout: 500000,

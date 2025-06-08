@@ -44,6 +44,7 @@
     "fs-extra": "11.3.0",
     "globals": "16.2.0",
     "hardhat": "^2.22.8",
+    "hardhat-contract-sizer": "^2.10.0",
     "hardhat-deploy": "1.0.2",
     "hardhat-gas-reporter": "^1.0.9",
     "hardhat-ignore-warnings": "^0.2.11",
