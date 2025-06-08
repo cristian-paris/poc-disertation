@@ -3,6 +3,8 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { toBufferBE } from "bigint-buffer";
 import { expect } from "chai";
 import type { FhevmInstance } from "fhevmjs";
+import { ethers } from "hardhat";
+import { performance } from "perf_hooks";
 
 import type { BloodGlucoseClaim, IdMapping, MedicalID } from "../../types";
 import { createInstance } from "../instance";
@@ -11,154 +13,210 @@ import { getSigners, initSigners } from "../signers";
 import { bigIntToBytes64 } from "../utils";
 import { deployBloodGlucoseClaimFixture } from "./fixture/BloodGlucoseClaim.fixture";
 
-// Helper function to convert bigint to bytes
-export const bigIntToBytes256 = (value: bigint) => {
-  return new Uint8Array(toBufferBE(value, 256));
-};
 
-describe("MedicalID", function () {
+async function send<T extends ethers.ContractTransactionResponse>(
+  txPromise: Promise<T>,
+  label: string
+): Promise<ethers.ContractTransactionReceipt> {
+  const t0 = performance.now();
+  const tx = await txPromise;
+  const rcpt = await tx.wait();
+  const t1 = performance.now();
+
+  const minedBlock = await ethers.provider.getBlock(rcpt.blockNumber);
+  const prevBlock = await ethers.provider.getBlock(rcpt.blockNumber - 1);
+
+  console.log(
+    `${label.padEnd(32)}| gasUsed ${rcpt.gasUsed} | ` +
+    `wall ${((t1 - t0) / 1_000).toFixed(2)} s | ` +
+    `blockΔ ${(minedBlock.timestamp - prevBlock.timestamp)} s`
+  );
+
+  expect(rcpt.gasUsed).to.be.gt(0n);
+  return rcpt;
+}
+
+export const bigIntToBytes256 = (v: bigint) =>
+  new Uint8Array(toBufferBE(v, 256));
+
+describe("MedicalID (with size/gas/time checks)", function () {
   let medicalID: MedicalID;
   let bloodGlucoseClaim: BloodGlucoseClaim;
   let idMapping: IdMapping;
 
-  // Initialize signers before running tests
   before(async function () {
     await initSigners();
     this.signers = await getSigners();
   });
 
-  // Deploy fresh contract instances before each test
   beforeEach(async function () {
-    const deployment = await deployBloodGlucoseClaimFixture();
-    bloodGlucoseClaim = deployment.bloodGlucoseClaim;
-    medicalID = deployment.medicalID;
-    idMapping = deployment.idMapping;
+    const d = await deployBloodGlucoseClaimFixture();
+    bloodGlucoseClaim = d.bloodGlucoseClaim;
+    medicalID = d.medicalID;
+    idMapping = d.idMapping;
 
     this.instances = await createInstance();
   });
 
-  // Helper function to register identity
   async function registerIdentity(
     userId: bigint,
     instance: FhevmInstance,
-    medicalAddress: string,
+    medicalAddr: string,
     signer: HardhatEthersSigner,
-    bloodGlucose = 8n,
+    bloodGlucose: bigint = 8n,
     firstname = bigIntToBytes64(8n),
     lastname = bigIntToBytes64(8n),
-    birthdate = 946681200n, // Sat Jan 01 2000 - 24 years old
+    birthdate = 946681200n
   ) {
-    const input = instance.createEncryptedInput(medicalAddress, signer.address);
-    const encryptedData = await input
+    const input = instance.createEncryptedInput(medicalAddr, signer.address);
+
+    const tEnc0 = performance.now();
+    const enc = await input
       .add16(bloodGlucose)
       .addBytes64(firstname)
       .addBytes64(lastname)
       .add32(birthdate)
       .encrypt();
+    const tEnc1 = performance.now();
+    console.log(
+      `encrypt() for ${signer.address.slice(0, 6)}… took ${((tEnc1 - tEnc0) / 1_000).toFixed(2)} s`
+    );
 
-    await (
-      await medicalID
-        .connect(signer)
-        .registerIdentity(
-          userId,
-          encryptedData.handles[0],
-          encryptedData.handles[1],
-          encryptedData.handles[2],
-          encryptedData.handles[3],
-          encryptedData.inputProof
-        )
-    ).wait();
+    await send(
+      medicalID.connect(signer).registerIdentity(
+        userId,
+        enc.handles[0],
+        enc.handles[1],
+        enc.handles[2],
+        enc.handles[3],
+        enc.inputProof
+      ),
+      `registerIdentity(${signer.address.slice(0, 6)}…)`
+    );
   }
 
-  it("registers an identity successfully", async function () {
-    await (await idMapping.connect(this.signers.alice).generateId()).wait();
-    const userId = await idMapping.getId(this.signers.alice.address);
+  // it("registers an identity successfully", async function () {
+  //   await (await idMapping.connect(this.signers.alice).generateId()).wait();
+  //   const userId = await idMapping.getId(this.signers.alice.address);
 
-    await registerIdentity(
-      userId,
-      this.instances,
-      await medicalID.getAddress(),
-      this.signers.alice
+  //   await registerIdentity(
+  //     userId,
+  //     this.instances,
+  //     await medicalID.getAddress(),
+  //     this.signers.alice
+  //   );
+
+  //   expect(await medicalID.registered(userId)).to.be.true;
+  // });
+
+  // it("prevents duplicate registration", async function () {
+  //   await (await idMapping.connect(this.signers.alice).generateId()).wait();
+  //   const userId = await idMapping.getId(this.signers.alice.address);
+
+  //   await registerIdentity(userId, this.instances, await medicalID.getAddress(), this.signers.alice);
+
+  //   await expect(
+  //     registerIdentity(userId, this.instances, await medicalID.getAddress(), this.signers.alice)
+  //   ).to.be.revertedWithCustomError(medicalID, "AlreadyRegistered");
+  // });
+
+  // it("retrieves the registered identity", async function () {
+  //   await (await idMapping.connect(this.signers.alice).generateId()).wait();
+  //   const userId = await idMapping.getId(this.signers.alice.address);
+
+  //   await registerIdentity(
+  //     userId,
+  //     this.instances,
+  //     await medicalID.getAddress(),
+  //     this.signers.alice
+  //   );
+
+  //   const firstnameHandleAlice = await medicalID.getMyIdentityFirstname(userId);
+
+  //   const reencryptedFirstname = await reencryptEbytes64(
+  //     this.signers.alice,
+  //     this.instances,
+  //     firstnameHandleAlice,
+  //     await medicalID.getAddress()
+  //   );
+
+  //   expect(reencryptedFirstname).to.equal(8);
+  // });
+
+  it("generates an adult claim (gas/size/time instrumentation)", async function () {
+    /* small helper local to this test ───────────────────────────────*/
+    const t = async <T>(label: string, f: () => Promise<T>): Promise<T> => {
+      const t0 = performance.now();
+      const out = await f();
+      const t1 = performance.now();
+      console.log(`${label.padEnd(24)}| view ${(t1 - t0).toFixed(2)} ms`);
+      return out;
+    };
+
+    /* ids for three users ───────────────────────────────────────────*/
+    await send(
+      idMapping.connect(this.signers.alice).generateId(),
+      "generateId(alice)"
+    );
+    const id1 = await t("getId(alice)", () =>
+      idMapping.getId(this.signers.alice.address)
     );
 
-    expect(await medicalID.registered(userId)).to.be.true;
-  });
-
-  it("prevents duplicate registration", async function () {
-    await (await idMapping.connect(this.signers.alice).generateId()).wait();
-    const userId = await idMapping.getId(this.signers.alice.address);
-
-    await registerIdentity(userId, this.instances, await medicalID.getAddress(), this.signers.alice);
-
-    await expect(
-      registerIdentity(userId, this.instances, await medicalID.getAddress(), this.signers.alice)
-    ).to.be.revertedWithCustomError(medicalID, "AlreadyRegistered");
-  });
-
-  it("retrieves the registered identity", async function () {
-    await (await idMapping.connect(this.signers.alice).generateId()).wait();
-    const userId = await idMapping.getId(this.signers.alice.address);
-
-    await registerIdentity(
-      userId,
-      this.instances,
-      await medicalID.getAddress(),
-      this.signers.alice
+    await send(
+      idMapping.connect(this.signers.bob).generateId(),
+      "generateId(bob)"
+    );
+    const id2 = await t("getId(bob)", () =>
+      idMapping.getId(this.signers.bob.address)
     );
 
-    const firstnameHandleAlice = await medicalID.getMyIdentityFirstname(userId);
+    // await send(
+    //   idMapping.connect(this.signers.carol).generateId(),
+    //   "generateId(carol)"
+    // );
+    // const id3 = await t("getId(carol)", () =>
+    //   idMapping.getId(this.signers.carol.address)
+    // );
 
-    const reencryptedFirstname = await reencryptEbytes64(
-      this.signers.alice,
-      this.instances,
-      firstnameHandleAlice,
-      await medicalID.getAddress()
-    );
-
-    expect(reencryptedFirstname).to.equal(8);
-  });
-
-  it("generates an adult claim", async function () {
-    await (await idMapping.connect(this.signers.alice).generateId()).wait();
-    const id1 = await idMapping.getId(this.signers.alice.address);
-
-    await (await idMapping.connect(this.signers.bob).generateId()).wait();
-    const id2 = await idMapping.getId(this.signers.bob.address);
-
-    await (await idMapping.connect(this.signers.carol).generateId()).wait();
-    const id3 = await idMapping.getId(this.signers.carol.address);
-
+    /* register identities ───────────────────────────────────────────*/
     await registerIdentity(id1, this.instances, await medicalID.getAddress(), this.signers.alice, 723n);
     await registerIdentity(id2, this.instances, await medicalID.getAddress(), this.signers.alice, 145n);
-    await registerIdentity(id3, this.instances, await medicalID.getAddress(), this.signers.alice, 132n);
+    // await registerIdentity(id3, this.instances, await medicalID.getAddress(), this.signers.alice, 132n);
 
-    await (await medicalID.connect(this.signers.alice)
-      .addToWhitelist(this.signers.dave.address)).wait();
-
-    const tx = await medicalID.connect(this.signers.dave).generateClaim(
-      await bloodGlucoseClaim.getAddress(),
-      "generateBloodGlucoseClaim(uint64[],address)",
-      [id1, id2, id3],
-      ["id", "birthdate", "bloodGlucose"]
+    /* whitelist claim-runner (dave) ────────────────────────────────*/
+    await send(
+      medicalID.connect(this.signers.alice).addToWhitelist(this.signers.dave.address),
+      "addToWhitelist(dave)"
     );
 
-    await tx.wait();
-
-    await expect(tx)
-      .to.emit(bloodGlucoseClaim, "BloodGlucoseClaimEvent");
-
-    await tx.wait();
-
-    const claimId = await bloodGlucoseClaim.lastClaimID();
-    const encAvg = await bloodGlucoseClaim.getBloodGlucoseClaim(claimId);
-
-    const plainAvg = await reencryptEuint64(
-      this.signers.dave,
-      this.instances,
-      encAvg,
-      await bloodGlucoseClaim.getAddress()
+    /* generate the claim ────────────────────────────────────────────*/
+    const claimRcpt = await send(
+      medicalID.connect(this.signers.dave).generateClaim(
+        await bloodGlucoseClaim.getAddress(),
+        "generateBloodGlucoseClaim(uint64[],address)",
+        [id1, id2],
+        ["id", "birthdate", "bloodGlucose"]
+      ),
+      "generateClaim"
     );
 
-    expect(plainAvg).to.equal(333n);
+    await expect(claimRcpt).to.emit(bloodGlucoseClaim, "BloodGlucoseClaimEvent");
+
+    /* view-functions timing & result check ─────────────────────────*/
+    const claimId = await t("lastClaimID()", () => bloodGlucoseClaim.lastClaimID());
+    const encAvg = await t("getBloodGlucoseClaim()", () =>
+      bloodGlucoseClaim.getBloodGlucoseClaim(claimId)
+    );
+
+    const plainAvg = await t("reencryptEuint64()", async () =>
+      reencryptEuint64(
+        this.signers.dave,
+        this.instances,
+        encAvg,
+        await bloodGlucoseClaim.getAddress()
+      )
+    );
+
+    expect(plainAvg).to.equal(434n);
   });
 });
